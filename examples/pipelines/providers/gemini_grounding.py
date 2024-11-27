@@ -1,3 +1,5 @@
+# gemini_grounding.py
+
 """
 title: Google GenAI Manifold Pipeline with Grounding
 author: Marc Lopez (refactor by justinh-rahb)
