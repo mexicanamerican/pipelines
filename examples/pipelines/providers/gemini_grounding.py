@@ -1,5 +1,3 @@
-# gemini_grounding.py
-
 """
 title: Google GenAI Manifold Pipeline with Grounding
 author: Marc Lopez (refactor by justinh-rahb)
@@ -11,16 +9,14 @@ requirements: google-generativeai
 environment_variables: GOOGLE_API_KEY
 """
 
-from typing import List, Union, Iterator, Dict
 import os
-
+import asyncio
+from typing import List, Union, Iterator, Dict
 from pydantic import BaseModel, Field
-
 import google.generativeai as genai
 from google.generativeai.types import (
     GenerationConfig,
     Tool,
-    GoogleSearchRetrieval,
     DynamicRetrievalConfig,
     HarmCategory,
     HarmBlockThreshold,
@@ -153,12 +149,12 @@ class Pipeline:
             if self.valves.GROUNDING_ENABLED:
                 tools.append(
                     Tool(
-                        google_search_retrieval=GoogleSearchRetrieval(
-                            dynamic_retrieval_config=DynamicRetrievalConfig(
-                                mode=DynamicRetrievalConfig.Mode.MODE_DYNAMIC,
-                                dynamic_threshold=self.valves.DYNAMIC_THRESHOLD,
-                            )
-                        )
+                        google_search_retrieval={
+                            "dynamic_retrieval_config": {
+                                "mode": "MODE_DYNAMIC",
+                                "dynamic_threshold": self.valves.DYNAMIC_THRESHOLD,
+                            }
+                        }
                     )
                 )
 
@@ -226,3 +222,26 @@ class Pipeline:
                     formatted_response["search_suggestions"].append(query)
 
         return formatted_response
+
+
+async def main():
+    # Set the GOOGLE_API_KEY environment variable
+    os.environ["GOOGLE_API_KEY"] = "YOUR_GOOGLE_API_KEY_HERE"
+
+    pipeline = Pipeline()
+    await pipeline.on_startup()
+
+    # Example usage
+    user_message = "Who won Wimbledon this year?"
+    model_id = "gemini-1.5-pro-002"
+    messages = [{"role": "user", "content": user_message}]
+    body = {"stream": False}
+
+    response = pipeline.pipe(user_message, model_id, messages, body)
+    print(response)
+
+    await pipeline.on_shutdown()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
