@@ -9,7 +9,7 @@ requirements: google-generativeai
 environment_variables: GOOGLE_API_KEY
 """
 
-from typing import List, Union, Iterator
+from typing import List, Union, Iterator, Dict, Any
 import os
 
 from pydantic import BaseModel, Field
@@ -27,6 +27,7 @@ class Pipeline:
         GOOGLE_API_KEY: str = ""
         USE_PERMISSIVE_SAFETY: bool = Field(default=False)
         GROUNDING_ENABLED: bool = Field(default=True)  # New valve for enabling/disabling grounding
+        GROUNDING_CONFIG: Dict[str, Any] = Field(default={})  # Configuration for grounding
 
     def __init__(self):
         self.type = "manifold"
@@ -36,7 +37,8 @@ class Pipeline:
         self.valves = self.Valves(**{
             "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY", ""),
             "USE_PERMISSIVE_SAFETY": False,
-            "GROUNDING_ENABLED": True
+            "GROUNDING_ENABLED": True,
+            "GROUNDING_CONFIG": {}
         })
         self.pipelines = []
 
@@ -140,12 +142,14 @@ class Pipeline:
 
             tools = []
             if self.valves.GROUNDING_ENABLED:
+                grounding_config = self.valves.GROUNDING_CONFIG or {}
+                dynamic_retrieval_config = grounding_config.get("dynamic_retrieval_config", {})
                 tools.append(
                     Tool(
                         google_search_retrieval=GoogleSearchRetrieval(
                             DynamicRetrievalConfig(
-                                mode=DynamicRetrievalConfig.Mode.MODE_DYNAMIC,
-                                dynamic_threshold=0.3,
+                                mode=dynamic_retrieval_config.get("mode", "unspecified"),
+                                dynamic_threshold=dynamic_retrieval_config.get("dynamic_threshold", 0.3),
                             )
                         )
                     )
