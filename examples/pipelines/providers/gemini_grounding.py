@@ -9,13 +9,20 @@ requirements: google-generativeai
 environment_variables: GOOGLE_API_KEY
 """
 
-from typing import List, Union, Iterator, Dict, Any
+from typing import List, Union, Iterator, Dict
 import os
 
 from pydantic import BaseModel, Field
 
 import google.generativeai as genai
-from google.generativeai.types import GenerationConfig, Tool, GoogleSearchRetrieval, DynamicRetrievalConfig
+from google.generativeai.types import (
+    GenerationConfig,
+    Tool,
+    GoogleSearchRetrieval,
+    DynamicRetrievalConfig,
+    HarmCategory,
+    HarmBlockThreshold,
+)
 
 
 class Pipeline:
@@ -27,7 +34,7 @@ class Pipeline:
         GOOGLE_API_KEY: str = ""
         USE_PERMISSIVE_SAFETY: bool = Field(default=False)
         GROUNDING_ENABLED: bool = Field(default=True)  # New valve for enabling/disabling grounding
-        GROUNDING_CONFIG: Dict[str, Any] = Field(default={})  # Configuration for grounding
+        DYNAMIC_THRESHOLD: float = Field(default=0.3)  # New valve for dynamic threshold
 
     def __init__(self):
         self.type = "manifold"
@@ -38,7 +45,7 @@ class Pipeline:
             "GOOGLE_API_KEY": os.getenv("GOOGLE_API_KEY", ""),
             "USE_PERMISSIVE_SAFETY": False,
             "GROUNDING_ENABLED": True,
-            "GROUNDING_CONFIG": {}
+            "DYNAMIC_THRESHOLD": 0.3
         })
         self.pipelines = []
 
@@ -90,7 +97,7 @@ class Pipeline:
             self.pipelines = []
 
     def pipe(
-        self, user_message: str, model_id: str, messages: List[dict], body: dict
+        self, user_message: str, model_id: str, messages: List[Dict], body: Dict
     ) -> Union[str, Iterator]:
         if not self.valves.GOOGLE_API_KEY:
             return "Error: GOOGLE_API_KEY is not set"
@@ -142,14 +149,12 @@ class Pipeline:
 
             tools = []
             if self.valves.GROUNDING_ENABLED:
-                grounding_config = self.valves.GROUNDING_CONFIG or {}
-                dynamic_retrieval_config = grounding_config.get("dynamic_retrieval_config", {})
                 tools.append(
                     Tool(
                         google_search_retrieval=GoogleSearchRetrieval(
-                            DynamicRetrievalConfig(
-                                mode=dynamic_retrieval_config.get("mode", "unspecified"),
-                                dynamic_threshold=dynamic_retrieval_config.get("dynamic_threshold", 0.3),
+                            dynamic_retrieval_config=DynamicRetrievalConfig(
+                                mode=DynamicRetrievalConfig.Mode.MODE_DYNAMIC,
+                                dynamic_threshold=self.valves.DYNAMIC_THRESHOLD,
                             )
                         )
                     )
@@ -174,10 +179,10 @@ class Pipeline:
 
             if self.valves.USE_PERMISSIVE_SAFETY:
                 safety_settings = {
-                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
-                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
                 }
             else:
                 safety_settings = body.get("safety_settings")
@@ -192,7 +197,7 @@ class Pipeline:
             if body.get("stream", False):
                 return self.stream_response(response)
             else:
-                return response.text
+                return self.format_response(response)
 
         except Exception as e:
             print(f"Error generating content: {e}")
@@ -202,3 +207,20 @@ class Pipeline:
         for chunk in response:
             if chunk.text:
                 yield chunk.text
+
+    def format_response(self, response):
+        """Format the response to include grounding sources and Google Search Suggestions."""
+        formatted_response = {"response": "", "grounding_sources": [], "search_suggestions": []}
+
+        for candidate in response.candidates:
+            formatted_response["response"] += candidate.content.parts[0].text
+
+            if hasattr(candidate, "grounding_metadata"):
+                grounding_metadata = candidate.grounding_metadata
+                for chunk in grounding_metadata.grounding_chunks:
+                    formatted_response["grounding_sources"].append(chunk.web.uri)
+                
+                for query in grounding_metadata.web_search_queries:
+                    formatted_response["search_suggestions"].append(query)
+
+        return formatted_response
